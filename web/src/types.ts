@@ -4,7 +4,6 @@ export type Kind = "job" | "phd" | "postdoc" | "masters" | "internship";
 
 export interface Loc {
   city?: string;
-  region?: string;
   country?: string;
   country_code?: string;
   lat?: number;
@@ -32,7 +31,6 @@ export interface Opportunity {
   edu?: "bachelor" | "masters" | "phd";
   salary?: string;
   contract?: string;
-  tags?: string[];
 }
 
 export interface Subfield {

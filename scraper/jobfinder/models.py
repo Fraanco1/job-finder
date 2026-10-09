@@ -59,7 +59,7 @@ class Opportunity:
     def id(self) -> str:
         return hashlib.sha1(f"{self.source}:{self.source_id}".encode()).hexdigest()[:12]
 
-    def to_public(self, snippet_len: int = 360) -> dict:
+    def to_public(self, snippet_len: int = 220) -> dict:
         """Compact JSON-ready dict for the frontend."""
         d = asdict(self)
         desc = " ".join(self.description.split())
@@ -73,10 +73,7 @@ class Opportunity:
             "org": self.organization,
             "kind": self.kind,
             "summary": desc,
-            "locs": [
-                {k: v for k, v in loc.items() if v not in (None, False, "")}
-                for loc in d["locations"]
-            ],
+            "locs": [_public_loc(loc) for loc in d["locations"]],
             "posted": _iso(self.posted),
             "deadline": _iso(self.deadline),
             "start": _iso(self.start_date),
@@ -87,10 +84,21 @@ class Opportunity:
             "edu": self.education_level,
             "salary": self.salary,
             "contract": self.contract,
-            "tags": self.tags,
         }
         return {k: v for k, v in out.items() if v not in (None, [], "")}
 
 
 def _iso(d: date | None) -> str | None:
     return d.isoformat() if d else None
+
+
+def _public_loc(loc: dict) -> dict:
+    """Compact location: ~100 m coordinates, city precision implied, no region."""
+    out = {k: v for k, v in loc.items()
+           if v not in (None, False, "") and k not in ("region", "precision")}
+    for k in ("lat", "lon"):
+        if k in out:
+            out[k] = round(out[k], 3)
+    if loc.get("precision") == "country":
+        out["precision"] = "country"
+    return out
