@@ -1,0 +1,146 @@
+"""Run sources, normalize, filter, de-duplicate and write the frontend data file."""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+import time
+import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date, datetime, timezone
+from pathlib import Path
+
+from .classify import enrich
+from .dates import find_deadline, find_start
+from .models import KIND_LABELS, Opportunity
+from .sources import all_sources
+from .taxonomy import public_taxonomy
+
+log = logging.getLogger(__name__)
+
+ROOT = Path(__file__).resolve().parents[2]
+OUTPUT = ROOT / "web" / "public" / "data" / "opportunities.json"
+SNAPSHOT_DIR = ROOT / "data" / "snapshots"
+
+
+def normalize(opp: Opportunity) -> Opportunity | None:
+    """Fill gaps from the description and drop what we cannot use."""
+    if not opp.title or not opp.url:
+        return None
+    text = opp.description or ""
+    if opp.deadline is None:
+        opp.deadline = find_deadline(text)
+    if opp.start_date is None and not opp.start_text:
+        opp.start_date = find_start(text)
+    today = date.today()
+    # A start date already in the past means "as soon as possible".
+    if opp.start_date and opp.start_date < today:
+        opp.start_date = None
+        opp.start_text = opp.start_text or "As soon as possible"
+    # Deadlines earlier than the posting date are parsing noise.
+    if opp.deadline and opp.posted and opp.deadline < opp.posted:
+        opp.deadline = None
+    enrich(opp)
+    if not opp.disciplines:
+        return None  # not STEM
+    if opp.deadline and opp.deadline < today:
+        return None  # expired
+    return opp
+
+
+def _dedupe_key(o: Opportunity) -> str:
+    t = re.sub(r"[^a-z0-9]+", " ", o.title.lower()).strip()
+    org = re.sub(r"[^a-z0-9]+", " ", (o.organization or "").lower()).strip()
+    return f"{t}|{org}"
+
+
+def run_source(cls, limit: int | None) -> tuple[list[Opportunity], dict]:
+    started = time.time()
+    status = {"id": cls.id, "name": cls.name, "homepage": cls.homepage}
+    try:
+        src = cls(limit=limit)
+        raw = list(src.fetch())
+        items = [o for o in (normalize(x) for x in raw) if o]
+        status.update(ok=True, fetched=len(raw), kept=len(items))
+        log.info("%s: %d fetched, %d kept (%.0fs)", cls.id, len(raw), len(items), time.time() - started)
+        return items, status
+    except Exception as e:  # noqa: BLE001
+        log.error("%s failed: %s\n%s", cls.id, e, traceback.format_exc())
+        status.update(ok=False, error=f"{type(e).__name__}: {e}"[:300])
+        return [], status
+
+
+def _load_snapshot(source_id: str) -> list[dict]:
+    try:
+        return json.loads((SNAPSHOT_DIR / f"{source_id}.json").read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+
+def _save_snapshot(source_id: str, items: list[dict]) -> None:
+    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    (SNAPSHOT_DIR / f"{source_id}.json").write_text(json.dumps(items, ensure_ascii=False))
+
+
+def run(only: list[str] | None = None, limit: int | None = None, workers: int = 6,
+        output: Path = OUTPUT) -> dict:
+    sources = all_sources()
+    selected = {k: v for k, v in sources.items() if not only or k in only}
+    if only and (missing := set(only) - set(selected)):
+        raise SystemExit(f"unknown source(s): {', '.join(sorted(missing))}. "
+                         f"Available: {', '.join(sources)}")
+
+    per_source: dict[str, list[dict]] = {}
+    statuses: dict[str, dict] = {}
+    with ThreadPoolExecutor(workers) as ex:
+        futs = {ex.submit(run_source, cls, limit): sid for sid, cls in selected.items()}
+        for fut in as_completed(futs):
+            sid = futs[fut]
+            items, status = fut.result()
+            public = [o.to_public() for o in items]
+            if status["ok"] and (public or not _load_snapshot(sid)):
+                if limit is None:
+                    _save_snapshot(sid, public)
+                per_source[sid] = public
+            else:
+                # Keep yesterday's data rather than wiping a source on a transient failure.
+                stale = _load_snapshot(sid)
+                today = date.today().isoformat()
+                per_source[sid] = [x for x in stale if not x.get("deadline") or x["deadline"] >= today]
+                status["stale"] = True
+            statuses[sid] = status
+
+    # Sources not run this time (``--only``) keep their previous snapshot.
+    for sid in sources:
+        if sid not in per_source:
+            snap = _load_snapshot(sid)
+            if snap:
+                per_source[sid] = snap
+                statuses[sid] = {"id": sid, "name": sources[sid].name,
+                                 "homepage": sources[sid].homepage, "ok": True, "stale": True}
+
+    merged: dict[str, dict] = {}
+    for sid in sorted(per_source):
+        for item in per_source[sid]:
+            key = re.sub(r"[^a-z0-9]+", " ", f"{item['title']}|{item.get('org', '')}".lower())
+            if key in merged:
+                continue
+            merged[key] = item
+    items = sorted(merged.values(), key=lambda x: (x.get("deadline") or "9999", x["title"]))
+    for sid, st in statuses.items():
+        st["count"] = sum(1 for x in items if x["source"] == sid)
+
+    payload = {
+        "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "taxonomy": public_taxonomy(),
+        "kinds": [{"id": k, "label": v} for k, v in KIND_LABELS.items()],
+        "sources": sorted(statuses.values(), key=lambda s: s["id"]),
+        "items": items,
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    tmp = output.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    tmp.replace(output)
+    log.info("wrote %d opportunities to %s", len(items), output)
+    return payload

@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Scraper working data (downloaded gazetteer, detail-page cache, per-source snapshots)
+data/geonames/
+data/cache/
+data/snapshots/
+
+# Generated data file (built by the scraper / CI)
+web/public/data/opportunities.json
+
+# Node
+node_modules/
+web/dist/
+*.log
+.DS_Store
