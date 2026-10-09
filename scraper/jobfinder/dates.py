@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from dateutil import parser as du
 
@@ -50,7 +50,7 @@ def parse_timestamp(value) -> date | None:
     if isinstance(value, (int, float)):
         if value > 1e12:
             value /= 1000
-        return datetime.utcfromtimestamp(value).date()
+        return datetime.fromtimestamp(value, timezone.utc).date()
     return parse_date(str(value), dayfirst=False)
 
 

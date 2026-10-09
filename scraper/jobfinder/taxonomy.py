@@ -172,7 +172,9 @@ DISCIPLINES: tuple[Discipline, ...] = (
     Discipline(
         "computer-science", "Computer Science",
         keywords=("computer science", "software", "machine learning", "artificial intelligence",
-                  "computing", "algorithms", "data science", "informatics"),
+                  "computing", "algorithms", "data science", "informatics", "developer", "sql",
+                  "devops", "site reliability", "sre", "kubernetes", "cloud infrastructure",
+                  "backend", "frontend", "full stack", "full-stack", "programmer", "data engineer"),
         degree_terms=("computer science", "computer scientist", "informatics", "software engineering",
                       "computing", "computer engineering", "data science"),
         subfields=(
@@ -208,7 +210,10 @@ DISCIPLINES: tuple[Discipline, ...] = (
     Discipline(
         "electrical-engineering", "Electrical & Electronic Engineering",
         keywords=("electrical engineering", "electronic engineering", "electronics", "circuit*",
-                  "signal processing", "power systems", "semiconductor*", "fpga", "asic", "rf"),
+                  "signal processing", "power systems", "semiconductor*", "fpga", "asic", "rf",
+                  "mixed-signal", "mixed signal", "analog", "pcb", "rtl", "design verification",
+                  "verification engineer", "hardware engineer*", "electrical engineer*", "silicon",
+                  "firmware"),
         degree_terms=("electrical engineering", "electronic engineering", "electronics engineering",
                       "electrical and electronic engineering", "electrical engineer",
                       "electronics", "ee", "electrical and computer engineering", "ece",
@@ -241,7 +246,8 @@ DISCIPLINES: tuple[Discipline, ...] = (
     Discipline(
         "mechanical-engineering", "Mechanical Engineering",
         keywords=("mechanical engineering", "mechanical engineer", "thermodynamics", "fluid*",
-                  "mechanics", "manufacturing"),
+                  "mechanics", "manufacturing", "mechanical design", "cad", "solidworks", "catia",
+                  "tire", "tyre", "powertrain", "drivetrain", "hvac"),
         degree_terms=("mechanical engineering", "mechanical engineer", "mechatronics",
                       "mechanical and aerospace engineering"),
         subfields=(
@@ -347,7 +353,8 @@ DISCIPLINES: tuple[Discipline, ...] = (
                 "hydraulic*", "hydrology", "water resources", "wastewater", "water treatment",
                 "flood*", "coastal engineering"),
             _sf("transportation", "Transportation & Infrastructure",
-                "transportation", "transport", "traffic", "infrastructure", "railway*", "urban mobility"),
+                "transportation engineering", "transport planning", "traffic engineering", "civil infrastructure",
+                "transport infrastructure", "railway engineering", "urban mobility"),
             _sf("environmental-eng", "Environmental Engineering",
                 "environmental engineering", "pollution", "air quality", "waste management",
                 "remediation"),

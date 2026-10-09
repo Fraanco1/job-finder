@@ -118,3 +118,31 @@ def test_enrich_sets_kind_and_fields():
     o = enrich(_opp())
     assert o.kind == "phd"
     assert "physics" in o.disciplines and "condensed-matter" in o.subfields
+
+
+# ---------------------------------------------------------------- industry edge cases
+
+def test_company_boilerplate_phds_do_not_make_a_phd_position():
+    body = "Axelera has 60+ PhDs on staff building AI accelerators. You will test silicon."
+    assert infer_kind("Test Technician", body) == "job"
+
+
+def test_industry_research_associate_is_a_job():
+    assert infer_kind("Research Associate II, Assay Development") == "job"
+    assert infer_kind("Postdoctoral Research Associate in Photonics") == "postdoc"
+
+
+def test_phd_required_industry_titles_are_jobs():
+    assert infer_kind("ML Engineer (PhD, New Grad)") == "job"
+    assert infer_kind("Graduate Quantitative Researcher, PhD (2027 Start)") == "job"
+    assert infer_kind("PhD Researcher in Quantum Materials") == "phd"
+
+
+def test_infrastructure_is_not_civil_engineering():
+    disc, _ = classify_fields("Site Reliability Engineer, Data Infrastructure", "Kubernetes and cloud infrastructure.")
+    assert "civil-engineering" not in disc and "computer-science" in disc
+
+
+def test_industry_hardware_vocabulary():
+    disc, _ = classify_fields("Digital Mixed Signal Verification Engineer", "RTL design verification of mixed-signal chips.")
+    assert disc and disc[0] == "electrical-engineering"
