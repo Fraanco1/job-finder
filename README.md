@@ -130,6 +130,25 @@ is reused (minus expired postings) and the site marks that source as "from an ea
 
 One-time setup: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
 
+### Sources that block GitHub's servers
+
+EURAXESS (heavy rate-limiting) and DAAD (HTTP 403) refuse requests from cloud data centres,
+so a scrape on GitHub Actions gets little or nothing from them. Two safeguards keep the site
+complete:
+
+* **Shrink guard:** if a source returns less than half of what it had last time, the run is
+  treated as blocked and the previous data (minus expired postings) is kept.
+* **Seed snapshots:** `data/seed/` holds the last good result for these sources, scraped from
+  a home connection and committed. CI falls back to it whenever its own result is smaller.
+
+To refresh the seeds (weekly is plenty), run this from your own machine:
+
+```bash
+./scripts/refresh-seeds.sh   # scrape EURAXESS + DAAD locally, update data/seed/, commit and push
+```
+
+The push triggers a deploy, and expired postings are dropped automatically in the meantime.
+
 ## Project layout
 
 ```
@@ -155,6 +174,8 @@ web/
     filters.ts       filter + date rules (unit-tested)
   public/data/opportunities.json   generated, not committed
 data/                caches, snapshots, gazetteer (not committed)
+data/seed/           committed fallback data for sources that block CI (see above)
+scripts/             refresh-seeds.sh
 ```
 
 ## Adding a source

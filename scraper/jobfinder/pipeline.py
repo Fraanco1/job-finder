@@ -22,6 +22,9 @@ log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUT = ROOT / "web" / "public" / "data" / "opportunities.json"
 SNAPSHOT_DIR = ROOT / "data" / "snapshots"
+SEED_DIR = ROOT / "data" / "seed"
+# A run returning less than this share of the previous count is treated as blocked/broken.
+SHRINK_GUARD = 0.5
 
 
 # Roles that are never STEM, whatever the employer. Checked on the title only.
@@ -88,11 +91,36 @@ def run_source(cls, limit: int | None) -> tuple[list[Opportunity], dict]:
         return [], status
 
 
-def _load_snapshot(source_id: str) -> list[dict]:
+def _read_json_list(path: Path) -> list[dict]:
     try:
-        return json.loads((SNAPSHOT_DIR / f"{source_id}.json").read_text())
+        return json.loads(path.read_text())
     except (FileNotFoundError, json.JSONDecodeError):
         return []
+
+
+def _open_items(items: list[dict]) -> list[dict]:
+    today = date.today().isoformat()
+    return [x for x in items if not x.get("deadline") or x["deadline"] >= today]
+
+
+def _load_snapshot(source_id: str) -> list[dict]:
+    """Last good result for a source: the local snapshot, or the committed seed if that
+    has more open postings (sites that block cloud IPs are seeded from a home machine)."""
+    snap = _open_items(_read_json_list(SNAPSHOT_DIR / f"{source_id}.json"))
+    seed = _open_items(_read_json_list(SEED_DIR / f"{source_id}.json"))
+    return seed if len(seed) > len(snap) else snap
+
+
+def save_seeds(source_ids: list[str]) -> dict[str, int]:
+    """Copy the current snapshots of ``source_ids`` into data/seed/ (committed to git)."""
+    SEED_DIR.mkdir(parents=True, exist_ok=True)
+    written = {}
+    for sid in source_ids:
+        items = _open_items(_read_json_list(SNAPSHOT_DIR / f"{sid}.json"))
+        if items:
+            (SEED_DIR / f"{sid}.json").write_text(json.dumps(items, ensure_ascii=False, separators=(",", ":")))
+            written[sid] = len(items)
+    return written
 
 
 def _save_snapshot(source_id: str, items: list[dict]) -> None:
@@ -123,19 +151,23 @@ def run(only: list[str] | None = None, limit: int | None = None, workers: int = 
             public = [o.to_public() for o in items]
             # An empty result almost always means the site changed or blocked us, not that every
             # posting vanished overnight, so it never overwrites the previous snapshot.
-            if status["ok"] and public:
+            previous = _load_snapshot(sid)
+            # A sudden collapse (or an empty result) almost always means the site changed or
+            # blocked us, not that the postings vanished overnight, so it never overwrites the
+            # previous snapshot. Quick --limit runs are exempt.
+            shrunk = (limit is None and len(previous) >= 20
+                      and len(public) < SHRINK_GUARD * len(previous))
+            if status["ok"] and public and not shrunk:
                 if limit is None:
                     _save_snapshot(sid, public)
                 per_source[sid] = public
             else:
-                # Keep yesterday's data rather than wiping a source on a transient failure.
-                stale = _load_snapshot(sid)
-                today = date.today().isoformat()
-                per_source[sid] = [x for x in stale if not x.get("deadline") or x["deadline"] >= today]
-                status["stale"] = bool(stale)
-                if status["ok"] and not public:
+                per_source[sid] = previous
+                status["stale"] = bool(previous)
+                if status["ok"]:
                     status["ok"] = False
-                    status.setdefault("error", "no items returned")
+                    status.setdefault("error", f"only {len(public)} items (previously {len(previous)})"
+                                      if public else "no items returned")
             statuses[sid] = status
 
     # Sources not run this time (``--only``) keep their previous snapshot.

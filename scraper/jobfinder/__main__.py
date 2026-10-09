@@ -19,6 +19,8 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("sources", help="list available sources")
     sub.add_parser("build", help="rebuild the data file from saved snapshots, without scraping")
+    sd = sub.add_parser("seed", help="copy snapshots into data/seed/ (committed) for sites that block CI")
+    sd.add_argument("sources", nargs="*", default=["euraxess", "daad"])
 
     sv = sub.add_parser("serve", help="serve the built site with a /api/refresh endpoint")
     sv.add_argument("--port", type=int, default=8000)
@@ -44,6 +46,10 @@ def main(argv: list[str] | None = None) -> int:
             extra = " (stale)" if s.get("stale") else ""
             print(f"[{flag}] {s['id']:20} {s.get('count', 0):6d}{extra} {s.get('error', '')}")
         print(f"total: {len(payload['items'])}")
+    elif args.cmd == "seed":
+        from .pipeline import save_seeds
+        for sid, n in save_seeds(args.sources).items():
+            print(f"seeded {sid}: {n} open postings")
     elif args.cmd == "serve":
         from .server import serve
         serve(args.host, args.port)

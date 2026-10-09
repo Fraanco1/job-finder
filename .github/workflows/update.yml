@@ -6,7 +6,7 @@ on:
   workflow_dispatch: # "Run workflow" button = refresh on demand
   push:
     branches: [main]
-    paths: ["web/**", "scraper/**", ".github/workflows/**"]
+    paths: ["web/**", "scraper/**", "data/seed/**", ".github/workflows/**"]
 
 permissions:
   contents: read
