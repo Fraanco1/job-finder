@@ -103,6 +103,12 @@ def test_normalize_drops_expired_and_non_stem():
     assert normalize(_opp()) is not None
 
 
+def test_normalize_drops_non_technical_titles():
+    assert normalize(_opp(title="Internship in Graphic Design")) is None
+    assert normalize(_opp(title="Talent Acquisition Partner, Quantum Hardware")) is None
+    assert normalize(_opp(title="RF Communications Engineer")) is not None
+
+
 def test_normalize_past_start_means_asap():
     o = normalize(_opp(start_date=date.today() - timedelta(days=10)))
     assert o.start_date is None and o.start_text == "As soon as possible"

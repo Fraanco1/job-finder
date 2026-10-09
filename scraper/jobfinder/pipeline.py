@@ -24,9 +24,26 @@ OUTPUT = ROOT / "web" / "public" / "data" / "opportunities.json"
 SNAPSHOT_DIR = ROOT / "data" / "snapshots"
 
 
+# Roles that are never STEM, whatever the employer. Checked on the title only.
+NON_STEM_TITLE = re.compile(
+    r"\b(graphic design\w*|marketing|sales|accountant|accounting|bookkeep\w*|recruit(?:er|ing|ment)|"
+    r"talent acquisition|human resources|hr (?:manager|business partner|generalist|specialist|officer)|"
+    r"people (?:partner|operations)|legal counsel|lawyer|attorney|paralegal|office manager|"
+    r"(?:executive|administrative|personal) assistant|receptionist|secretary|"
+    r"communications? (?:officer|manager|specialist|intern|coordinator)|public relations|press officer|"
+    r"events? (?:manager|coordinator)|social media|copywriter|content writer|"
+    r"finance (?:manager|analyst|director)|financial (?:analyst|controller)|treasury|"
+    r"procurement|purchasing|payroll|customer success|customer support|business development|"
+    r"account (?:executive|manager)|fundrais\w*|translator|interpreter|chef|cleaner|janitor)\b",
+    re.I,
+)
+
+
 def normalize(opp: Opportunity) -> Opportunity | None:
     """Fill gaps from the description and drop what we cannot use."""
     if not opp.title or not opp.url:
+        return None
+    if NON_STEM_TITLE.search(opp.title):
         return None
     text = opp.description or ""
     if opp.deadline is None:

@@ -592,6 +592,7 @@ ul.plain {
 }
 
 .back {
+  display: block;
   margin-bottom: 1rem;
   padding: 0.3rem 0.65rem;
   border: 1px solid var(--rule);
@@ -780,8 +781,23 @@ ul.plain {
     overflow: visible;
   }
   .legend {
+    top: 0.5rem;
+    bottom: auto;
     left: 0.5rem;
-    bottom: 0.5rem;
+    max-width: calc(100% - 1rem);
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+  .chip {
+    flex: none;
+  }
+  .search input {
+    width: 100%;
+  }
+  .search {
+    flex: 1 1 100%;
   }
   .sources {
     columns: 1;
