@@ -128,6 +128,33 @@ def _save_snapshot(source_id: str, items: list[dict]) -> None:
     (SNAPSHOT_DIR / f"{source_id}.json").write_text(json.dumps(items, ensure_ascii=False))
 
 
+def _norm(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def dedupe(per_source: dict[str, list[dict]]) -> list[dict]:
+    """Drop the same posting listed by several sources.
+
+    Same title + organisation is a duplicate. Long, specific titles at the same city are too,
+    even when the organisation is spelled differently ("Lund University" vs "Lund University
+    via MyNetwork"); short generic titles ("Software Engineer") never merge on city alone.
+    """
+    seen: set[str] = set()
+    out: list[dict] = []
+    for sid in sorted(per_source):
+        for item in per_source[sid]:
+            title = _norm(item["title"])
+            keys = [f"{title}|{_norm(item.get('org') or '')}"]
+            if len(title) >= 40:
+                city = next((loc.get("city") or loc.get("country") for loc in item.get("locs") or []), "")
+                keys.append(f"{title}@{_norm(city or '')}")
+            if any(k in seen for k in keys):
+                continue
+            seen.update(keys)
+            out.append(item)
+    return out
+
+
 def run(only: list[str] | None = None, limit: int | None = None, workers: int = 6,
         output: Path = OUTPUT, scrape: bool = True) -> dict:
     """Scrape the selected sources (all by default) and write the data file.
@@ -179,14 +206,7 @@ def run(only: list[str] | None = None, limit: int | None = None, workers: int = 
                 statuses[sid] = {"id": sid, "name": sources[sid].name,
                                  "homepage": sources[sid].homepage, "ok": True}
 
-    merged: dict[str, dict] = {}
-    for sid in sorted(per_source):
-        for item in per_source[sid]:
-            key = re.sub(r"[^a-z0-9]+", " ", f"{item['title']}|{item.get('org', '')}".lower())
-            if key in merged:
-                continue
-            merged[key] = item
-    items = sorted(merged.values(), key=lambda x: (x.get("deadline") or "9999", x["title"]))
+    items = sorted(dedupe(per_source), key=lambda x: (x.get("deadline") or "9999", x["title"]))
     for sid, st in statuses.items():
         st["count"] = sum(1 for x in items if x["source"] == sid)
 

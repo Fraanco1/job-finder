@@ -50,3 +50,16 @@ def test_seed_used_when_blocked_in_ci(monkeypatch, env):
     (env / "seed" / "fake.json").write_text(json.dumps(seed))
     payload = run_with(monkeypatch, env, 0)
     assert len(payload["items"]) == 30
+
+
+def test_dedupe_across_sources():
+    long_t = "Doctoral student in Physics: Topoelectronic Quantum Devices in 2D Materials"
+    per_source = {
+        "euraxess": [{"title": long_t, "org": "Lund University", "locs": [{"city": "Lund"}]}],
+        "varbi": [{"title": long_t, "org": "Lund University via MyNetwork", "locs": [{"city": "Lund"}]},
+                  {"title": "Software Engineer", "org": "A", "locs": [{"city": "Lund"}]}],
+        "greenhouse": [{"title": "Software Engineer", "org": "B", "locs": [{"city": "Lund"}]}],
+    }
+    out = pipeline.dedupe(per_source)
+    assert [x["title"] for x in out].count(long_t) == 1
+    assert len([x for x in out if x["title"] == "Software Engineer"]) == 2

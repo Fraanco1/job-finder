@@ -234,6 +234,8 @@ function DataStatus({ data, onRefreshed }: { data: Dataset; onRefreshed: () => v
   const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
+    // Static hosting (GitHub Pages) has no refresh API; only the local server does.
+    if (window.location.hostname.endsWith("github.io")) return;
     fetch("api/status")
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((s) => setApi(s.running ? "running" : "idle"))
