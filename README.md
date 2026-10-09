@@ -92,6 +92,7 @@ python -m jobfinder scrape                  # all sources
 python -m jobfinder scrape --only euraxess  # one source
 python -m jobfinder scrape --limit 30       # quick smoke test (doesn't overwrite snapshots)
 python -m jobfinder sources                 # list sources
+python -m jobfinder build                   # rebuild the data file from saved snapshots (no network)
 
 # 2. Build and serve the site, with a "Refresh data" button wired to the scrapers
 cd ../web
