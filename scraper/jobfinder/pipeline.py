@@ -140,7 +140,7 @@ def run(only: list[str] | None = None, limit: int | None = None, workers: int = 
             if snap:
                 per_source[sid] = snap
                 statuses[sid] = {"id": sid, "name": sources[sid].name,
-                                 "homepage": sources[sid].homepage, "ok": True, "stale": True}
+                                 "homepage": sources[sid].homepage, "ok": True}
 
     merged: dict[str, dict] = {}
     for sid in sorted(per_source):
