@@ -44,6 +44,10 @@ jobs:
           key: scraper-state-${{ github.run_id }}
           restore-keys: scraper-state-
 
+      - name: Test scrapers
+        working-directory: scraper
+        run: python -m pytest -q
+
       - name: Scrape
         working-directory: scraper
         run: python -m jobfinder scrape

@@ -9,13 +9,14 @@ required education and full description.
 from __future__ import annotations
 
 import re
-from concurrent.futures import ThreadPoolExecutor
-from urllib.parse import urlencode
+import os
+import time
 
+from ..classify import classify_fields
 from ..dates import parse_date
 from ..geocode import geocode
 from ..models import Location, Opportunity
-from ..taxonomy import EURAXESS_FIELD_MAP, EURAXESS_STEM_FIELD_IDS
+from ..taxonomy import EURAXESS_FIELD_MAP
 from .base import DetailCache, Source, soup
 
 BASE = "https://euraxess.ec.europa.eu"
@@ -40,18 +41,11 @@ class Euraxess(Source):
     id = "euraxess"
     name = "EURAXESS"
     homepage = BASE + "/jobs/search"
-    # EURAXESS rate-limits bursts (HTTP 429); one request every ~1.5 s stays well under it.
-    min_interval = 1.5
-    workers = 1
-
-    PAGE_CAP = 40  # the search UI never pages past 40 x 10 results; deeper pages wrap to page 0
-
-    @staticmethod
-    def search_url(facets: list[tuple[str, int]], page: int = 0) -> str:
-        params = [(f"f[{i}]", f"{name}:{val}") for i, (name, val) in enumerate(facets)]
-        if page:
-            params.append(("page", str(page)))
-        return f"{BASE}/jobs/search?{urlencode(params)}"
+    # EURAXESS rate-limits bursts (HTTP 429); one request every ~2 s stays well under it.
+    min_interval = 2.0
+    # Detail pages are fetched newest-first within this time budget per run; the rest use
+    # listing data until a later run fills the cache. Override with EURAXESS_DETAIL_BUDGET.
+    detail_budget_s = 3600
 
     @staticmethod
     def result_count(html: str) -> int:
@@ -60,60 +54,59 @@ class Euraxess(Source):
         return int(m.group(1).replace(",", "")) if m else 0
 
     @staticmethod
-    def country_ids(html: str) -> list[int]:
-        sel = soup(html).find("select", attrs={"name": "job_country[]"})
-        return [int(o["value"]) for o in sel.select("option")] if sel else []
+    def is_stem_card(card: dict) -> bool:
+        """Cheap pre-filter on listing data, so detail pages are fetched only for STEM postings."""
+        for raw in card.get("fields") or []:
+            for part in raw.split("»"):
+                if EURAXESS_FIELD_MAP.get(part.strip().lower(), (None,))[0]:
+                    return True
+        disc, _ = classify_fields(card.get("title", ""), card.get("summary", ""), card.get("fields"))
+        return bool(disc)
 
     # ------------------------------------------------------------ listing
 
     def crawl_listing(self) -> list[dict]:
-        """Crawl every STEM posting, partitioning queries so none exceeds the page cap."""
-        fields = [("job_research_field", f) for f in EURAXESS_STEM_FIELD_IDS]
-        first = self.http.get(self.search_url(fields))
+        """Walk the unfiltered listing (newest first) and keep STEM cards.
+
+        Facet filters in the URL are not reliable (the site sometimes ignores them), so we
+        page through everything and filter locally. ~670 pages at the polite rate ≈ 20 min.
+        """
+        first = self.http.get(f"{BASE}/jobs/search")
         first.raise_for_status()
         total = self.result_count(first.text)
-        self.log.info("%d STEM postings advertised", total)
+        pages = (total + 9) // 10 if total else 2000
+        self.log.info("%d postings advertised (%d pages)", total, pages)
 
         rows: dict[str, dict] = {}
-        partitions: list[list[tuple[str, int]]] = []
-        if total <= self.PAGE_CAP * 10:
-            partitions.append(fields)
-        else:
-            for cid in self.country_ids(first.text):
-                partitions.append(fields + [("job_country", cid)])
-
-        while partitions:
-            facets = partitions.pop(0)
-            r = self.http.get(self.search_url(facets))
-            if r.status_code != 200:
-                self.log.warning("partition %s -> HTTP %s", facets[-1], r.status_code)
+        seen = 0
+        empty_streak = 0
+        for page in range(pages + 2):
+            if page == 0:
+                html = first.text
+            else:
+                r = self.http.get(f"{BASE}/jobs/search?page={page}")
+                if r.status_code != 200:
+                    self.log.warning("listing page %d -> HTTP %s", page, r.status_code)
+                    continue
+                html = r.text
+            cards = self.parse_listing(html)
+            fresh = [c for c in cards if c["id"] not in rows]
+            if not fresh:
+                empty_streak += 1
+                if empty_streak >= 3:
+                    break
                 continue
-            n = self.result_count(r.text)
-            if n == 0:
-                continue
-            field_facets = [f for f in facets if f[0] == "job_research_field"]
-            if n > self.PAGE_CAP * 10 and len(field_facets) > 1:
-                # Too big: split this country by research field (overlaps are de-duplicated).
-                rest = [f for f in facets if f[0] != "job_research_field"]
-                partitions[:0] = [rest + [f] for f in field_facets]
-                continue
-            pages = min(self.PAGE_CAP, (n + 9) // 10)
-            for page in range(pages):
-                if page == 0:
-                    html = r.text
-                else:
-                    rp = self.http.get(self.search_url(facets, page))
-                    if rp.status_code != 200:
-                        self.log.warning("page %d of %s -> HTTP %s", page, facets[-1], rp.status_code)
-                        continue
-                    html = rp.text
-                for c in self.parse_listing(html):
-                    rows.setdefault(c["id"], c)
-                if self.limit and len(rows) >= self.limit:
-                    return list(rows.values())[: self.limit]
-            self.log.info("partition %s: %d results, %d unique so far", facets[len(field_facets):] or "all",
-                          n, len(rows))
-        return list(rows.values())
+            empty_streak = 0
+            seen += len(cards)
+            for c in fresh:
+                if self.is_stem_card(c):
+                    rows[c["id"]] = c
+            if page % 50 == 0:
+                self.log.info("listing page %d/%d: %d STEM of %d seen", page, pages, len(rows), seen)
+            if self.limit and len(rows) >= self.limit:
+                break
+        out = list(rows.values())
+        return out[: self.limit] if self.limit else out
 
     @staticmethod
     def parse_listing(html: str) -> list[dict]:
@@ -222,20 +215,24 @@ class Euraxess(Source):
         todo = [c["id"] for c in cards if cache.get(c["id"]) is None]
         self.log.info("%d cards, %d new detail pages to fetch", len(cards), len(todo))
 
-        def work(jid: str):
+        budget = float(os.environ.get("EURAXESS_DETAIL_BUDGET", self.detail_budget_s))
+        deadline = time.monotonic() + budget
+        done = 0
+        for jid in todo:
+            if time.monotonic() > deadline:
+                self.log.info("detail budget used up; %d pages left for the next run", len(todo) - done)
+                break
             try:
                 d = self.fetch_detail(jid)
             except Exception as e:  # noqa: BLE001 - one bad page must not stop the crawl
                 self.log.warning("detail %s failed: %s", jid, e)
-                return
+                d = None
             if d:
                 cache.set(jid, d)
-
-        with ThreadPoolExecutor(self.workers) as ex:
-            for i, _ in enumerate(ex.map(work, todo)):
-                if i and i % 200 == 0:
-                    self.log.info("details %d/%d", i, len(todo))
-                    cache.save()
+            done += 1
+            if done % 100 == 0:
+                self.log.info("details %d/%d", done, len(todo))
+                cache.save()
         cache.save()
 
         for c in cards:
