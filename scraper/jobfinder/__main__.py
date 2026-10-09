@@ -18,6 +18,7 @@ def main(argv: list[str] | None = None) -> int:
     sc.add_argument("--workers", type=int, default=6, help="sources run in parallel")
 
     sub.add_parser("sources", help="list available sources")
+    sub.add_parser("build", help="rebuild the data file from saved snapshots, without scraping")
 
     sv = sub.add_parser("serve", help="serve the built site with a /api/refresh endpoint")
     sv.add_argument("--port", type=int, default=8000)
@@ -32,9 +33,12 @@ def main(argv: list[str] | None = None) -> int:
         from .sources import all_sources
         for sid, cls in all_sources().items():
             print(f"{sid:20} {cls.name:30} {cls.homepage}")
-    elif args.cmd == "scrape":
+    elif args.cmd in ("scrape", "build"):
         from .pipeline import run
-        payload = run(only=args.only, limit=args.limit, workers=args.workers)
+        if args.cmd == "build":
+            payload = run(scrape=False)
+        else:
+            payload = run(only=args.only, limit=args.limit, workers=args.workers)
         for s in payload["sources"]:
             flag = "ok " if s.get("ok") else "ERR"
             extra = " (stale)" if s.get("stale") else ""

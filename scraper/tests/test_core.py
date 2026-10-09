@@ -146,3 +146,12 @@ def test_infrastructure_is_not_civil_engineering():
 def test_industry_hardware_vocabulary():
     disc, _ = classify_fields("Digital Mixed Signal Verification Engineer", "RTL design verification of mixed-signal chips.")
     assert disc and disc[0] == "electrical-engineering"
+
+
+def test_employer_boilerplate_does_not_override_the_title():
+    boiler = ("IonQ builds quantum computers. Our quantum computers use trapped ions and lasers. "
+              "Join the quantum revolution with photonics. ")
+    disc, _ = classify_fields("IT Network Engineer II", boiler)
+    assert disc == ["computer-science"]
+    disc, _ = classify_fields("AI Research Engineer - Foundation Models", "Train foundation models.")
+    assert disc == ["computer-science"]

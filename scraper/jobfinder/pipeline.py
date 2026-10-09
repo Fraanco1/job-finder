@@ -101,9 +101,14 @@ def _save_snapshot(source_id: str, items: list[dict]) -> None:
 
 
 def run(only: list[str] | None = None, limit: int | None = None, workers: int = 6,
-        output: Path = OUTPUT) -> dict:
+        output: Path = OUTPUT, scrape: bool = True) -> dict:
+    """Scrape the selected sources (all by default) and write the data file.
+
+    With ``scrape=False`` nothing is fetched: the data file is rebuilt from the saved
+    per-source snapshots (useful after editing snapshots or the output format).
+    """
     sources = all_sources()
-    selected = {k: v for k, v in sources.items() if not only or k in only}
+    selected = {k: v for k, v in sources.items() if scrape and (not only or k in only)}
     if only and (missing := set(only) - set(selected)):
         raise SystemExit(f"unknown source(s): {', '.join(sorted(missing))}. "
                          f"Available: {', '.join(sources)}")

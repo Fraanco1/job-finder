@@ -159,17 +159,32 @@ def classify_fields(title: str, body: str, source_fields: list[str] | None = Non
                     sub_scores[s] = sub_scores.get(s, 0) + 6
 
     _accumulate(title, 3, disc_scores, sub_scores)
-    _accumulate(body[:6000], 1, disc_scores, sub_scores)
+    body_d: dict[str, int] = {}
+    body_s: dict[str, int] = {}
+    _accumulate(body[:6000], 1, body_d, body_s)
 
-    disciplines = [d for d, s in sorted(disc_scores.items(), key=lambda x: -x[1]) if s >= 3]
-    # A subfield counts when its discipline is in, or when its own evidence is strong.
     sub_parent = {s.id: d.id for d in DISCIPLINES for s in d.subfields}
+    # "Head" evidence = the title and the source's own field labels. Postings open with
+    # employer boilerplate ("we build quantum computers"), so when the head says what the
+    # role is, a discipline found only in the body needs much stronger support.
+    head_disc = set(disc_scores) | {sub_parent[s] for s in sub_scores}
+    strict = bool(head_disc)
+    body_only_min = 6 if strict else 3
+    sub_body_min = 4 if strict else 2
+
+    total_d = {d: disc_scores.get(d, 0) + body_d.get(d, 0) for d in set(disc_scores) | set(body_d)}
+    disciplines = [
+        d for d, sc in sorted(total_d.items(), key=lambda x: -x[1])
+        if (d in head_disc and sc >= 3) or body_d.get(d, 0) >= body_only_min
+    ]
     subfields = []
-    for sid, sc in sorted(sub_scores.items(), key=lambda x: -x[1]):
+    for sid in sorted(set(sub_scores) | set(body_s),
+                      key=lambda x: -(sub_scores.get(x, 0) + body_s.get(x, 0))):
         parent = sub_parent[sid]
-        if sc >= 3 or (parent in disciplines and sc >= 2):
+        head, bod = sub_scores.get(sid, 0), body_s.get(sid, 0)
+        if head >= 3 or bod >= sub_body_min or (head and head + bod >= 2):
             subfields.append(sid)
-            if parent not in disciplines and sc >= 4:
+            if parent not in disciplines and (head >= 3 or (not strict and bod >= 4)):
                 disciplines.append(parent)
     subfields = [s for s in subfields if sub_parent[s] in disciplines]
     return disciplines[:4], subfields[:6]
