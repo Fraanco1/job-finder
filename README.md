@@ -122,7 +122,9 @@ GitHub Pages:
   button for the hosted site.
 
 Detail-page caches and per-source snapshots are kept between runs with the Actions cache, so
-daily runs only fetch new postings. If a source fails or returns nothing, the previous snapshot
+daily runs only fetch new postings. EURAXESS rate-limits heavily, so its daily crawl is
+incremental (it stops once it reaches postings it has already seen). A full walk of its ~670
+listing pages runs on Sundays, or when you set `EURAXESS_FULL=1`. If a source fails or returns nothing, the previous snapshot
 is reused (minus expired postings) and the site marks that source as "from an earlier run".
 
 One-time setup: **Settings → Pages → Build and deployment → Source: GitHub Actions**.

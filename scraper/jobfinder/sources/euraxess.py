@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import os
+from datetime import date
 import time
 
 from ..classify import classify_fields
@@ -65,21 +66,36 @@ class Euraxess(Source):
 
     # ------------------------------------------------------------ listing
 
+    # Incremental mode stops after this many consecutive listing pages of already-known postings.
+    KNOWN_PAGES_TO_STOP = 5
+
+    def full_crawl_due(self, cards: DetailCache) -> bool:
+        """Walk the whole listing on Sundays, on request, or when nothing is cached yet."""
+        return (os.environ.get("EURAXESS_FULL") == "1" or not cards.data
+                or date.today().weekday() == 6)
+
     def crawl_listing(self) -> list[dict]:
         """Walk the unfiltered listing (newest first) and keep STEM cards.
 
         Facet filters in the URL are not reliable (the site sometimes ignores them), so we
-        page through everything and filter locally. ~670 pages at the polite rate ≈ 20 min.
+        page through the listing and filter locally. A full walk is ~670 pages and EURAXESS
+        rate-limits hard, so daily runs are incremental: they stop once they reach postings
+        seen before and reuse the cached cards for the rest. A weekly full walk drops
+        postings that have been taken down.
         """
+        card_cache = DetailCache(f"{self.id}-cards")
+        full = self.full_crawl_due(card_cache) or bool(self.limit)
         first = self.http.get(f"{BASE}/jobs/search")
         first.raise_for_status()
         total = self.result_count(first.text)
         pages = (total + 9) // 10 if total else 2000
-        self.log.info("%d postings advertised (%d pages)", total, pages)
+        self.log.info("%d postings advertised (%d pages), %s crawl", total, pages,
+                      "full" if full else "incremental")
 
         rows: dict[str, dict] = {}
+        listed: set[str] = set()
         seen = 0
-        empty_streak = 0
+        empty_streak = known_streak = 0
         for page in range(pages + 2):
             if page == 0:
                 html = first.text
@@ -90,21 +106,38 @@ class Euraxess(Source):
                     continue
                 html = r.text
             cards = self.parse_listing(html)
-            fresh = [c for c in cards if c["id"] not in rows]
+            fresh = [c for c in cards if c["id"] not in listed]
             if not fresh:
                 empty_streak += 1
                 if empty_streak >= 3:
+                    full = True  # walked to the end of the listing
                     break
                 continue
             empty_streak = 0
             seen += len(cards)
+            known_streak = known_streak + 1 if all(c["id"] in card_cache.data for c in fresh) else 0
             for c in fresh:
+                listed.add(c["id"])
+                card_cache.set(c["id"], c)
                 if self.is_stem_card(c):
                     rows[c["id"]] = c
             if page % 50 == 0:
                 self.log.info("listing page %d/%d: %d STEM of %d seen", page, pages, len(rows), seen)
             if self.limit and len(rows) >= self.limit:
                 break
+            if not full and known_streak >= self.KNOWN_PAGES_TO_STOP:
+                self.log.info("reached known postings at page %d; reusing cached cards", page)
+                break
+
+        if full and not self.limit:
+            # Postings missing from a complete walk have been taken down.
+            card_cache.data = {k: v for k, v in card_cache.data.items() if k in listed}
+        elif not self.limit:
+            for cid, entry in card_cache.data.items():
+                c = entry.get("v") or {}
+                if cid not in rows and self.is_stem_card(c):
+                    rows[cid] = c
+        card_cache.save()
         out = list(rows.values())
         return out[: self.limit] if self.limit else out
 
