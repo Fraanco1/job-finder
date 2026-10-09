@@ -24,6 +24,18 @@ function useDarkMode(): boolean {
   return dark;
 }
 
+const STORE_KEY = "fieldwork:lastQuery";
+
+/** A shared link wins; otherwise restore the visitor's last search. */
+function initialQuery(): string {
+  if (window.location.search) return window.location.search;
+  try {
+    return localStorage.getItem(STORE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
 async function fetchData(): Promise<Dataset> {
   const r = await fetch(`data/opportunities.json?t=${Date.now()}`);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -32,7 +44,7 @@ async function fetchData(): Promise<Dataset> {
 
 export default function App() {
   const [load, setLoad] = useState<Load>({ state: "loading" });
-  const [filters, setFilters] = useState<Filters>(() => filtersFromQuery(window.location.search));
+  const [filters, setFilters] = useState<Filters>(() => filtersFromQuery(initialQuery()));
   const [bounds, setBounds] = useState<LatLngBounds | null>(null);
   const [inViewOnly, setInViewOnly] = useState(true);
   const [pinned, setPinned] = useState<string[] | null>(null);
@@ -50,6 +62,11 @@ export default function App() {
   useEffect(() => {
     const qs = filtersToQuery(filters);
     window.history.replaceState(null, "", `${window.location.pathname}${qs}`);
+    try {
+      localStorage.setItem(STORE_KEY, qs);
+    } catch {
+      /* private mode: the URL still carries the state */
+    }
   }, [filters]);
 
   const set = useCallback((patch: Partial<Filters>) => {
@@ -150,7 +167,14 @@ export default function App() {
 
       <main className="body">
         <div className="map-wrap">
-          <MapView items={filtered} selectedId={selectedId} onSelect={onMapSelect} onBounds={setBounds} dark={dark} />
+          <MapView
+            items={filtered}
+            selectedId={selectedId}
+            onSelect={onMapSelect}
+            onBounds={setBounds}
+            dark={dark}
+            fitKey={filters.country}
+          />
           <fieldset className="legend">
             <legend className="sr-only">Opportunity types</legend>
             {KIND_ORDER.map((k) => {

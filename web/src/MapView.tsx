@@ -11,6 +11,8 @@ interface Props {
   onSelect: (ids: string[]) => void;
   onBounds: (b: L.LatLngBounds) => void;
   dark: boolean;
+  /** When this value changes (e.g. a country is picked), zoom to fit the current pins. */
+  fitKey?: string;
 }
 
 type PinMarker = L.CircleMarker & { options: L.CircleMarkerOptions & { oppId: string; kind: Kind } };
@@ -46,7 +48,7 @@ function clusterIcon(cluster: L.MarkerCluster): L.DivIcon {
   });
 }
 
-export default function MapView({ items, selectedId, onSelect, onBounds, dark }: Props) {
+export default function MapView({ items, selectedId, onSelect, onBounds, dark, fitKey }: Props) {
   const theme = dark ? "dark" : "light";
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
@@ -147,7 +149,35 @@ export default function MapView({ items, selectedId, onSelect, onBounds, dark }:
       }
     }
     g.addLayers(markers);
+    if (pendingFit.current) {
+      pendingFit.current = false;
+      fitToPins();
+    }
   }, [items, theme]);
+
+  // Zoom to the pins when the fit key changes; back to the world view when it is cleared.
+  // Filtering is deferred, so the fit stays pending until the next marker rebuild (or 1.5 s).
+  const lastFit = useRef(fitKey);
+  const pendingFit = useRef(false);
+  const fitToPins = () => {
+    const m = map.current;
+    const b = group.current?.getBounds();
+    if (m && b?.isValid()) m.fitBounds(b, { padding: [40, 40], maxZoom: 8 });
+  };
+  useEffect(() => {
+    const m = map.current;
+    if (!m || lastFit.current === fitKey) return;
+    lastFit.current = fitKey;
+    if (!fitKey) {
+      pendingFit.current = false;
+      m.setView([30, 5], 2);
+      return;
+    }
+    fitToPins();
+    pendingFit.current = true;
+    const t = setTimeout(() => (pendingFit.current = false), 1500);
+    return () => clearTimeout(t);
+  }, [fitKey]);
 
   // Halo around the selected opportunity, and pan to it if it is off-screen.
   useEffect(() => {
