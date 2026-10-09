@@ -29,8 +29,10 @@ class PoliteSession:
         self._lock = threading.Lock()
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": USER_AGENT, "Accept-Language": "en"})
-        retry = Retry(total=3, backoff_factor=1.5, status_forcelist=(429, 500, 502, 503, 504),
-                      allowed_methods=("GET", "POST"), respect_retry_after_header=True)
+        # Connection-level retries only; HTTP status retries are handled in _request so we can
+        # back off adaptively (some servers send non-integer Retry-After values urllib3 rejects).
+        retry = Retry(total=3, connect=3, read=2, status=0, backoff_factor=1.5,
+                      status_forcelist=(), respect_retry_after_header=False, raise_on_status=False)
         adapter = HTTPAdapter(max_retries=retry, pool_maxsize=16)
         self.session.mount("https://", adapter)
         self.session.mount("http://", adapter)
@@ -46,17 +48,35 @@ class PoliteSession:
                     return
             time.sleep(wait)
 
-    def get(self, url: str, **kw) -> requests.Response:
-        self._throttle(url)
+    RETRY_STATUS = (429, 500, 502, 503, 504)
+
+    def _request(self, method: str, url: str, attempts: int = 5, **kw) -> requests.Response:
         kw.setdefault("timeout", self.timeout)
-        r = self.session.get(url, **kw)
-        log.debug("GET %s -> %s", url, r.status_code)
+        delay = max(2.0, self.min_interval * 4)
+        for attempt in range(attempts):
+            self._throttle(url)
+            r = self.session.request(method, url, **kw)
+            log.debug("%s %s -> %s", method, url, r.status_code)
+            if r.status_code not in self.RETRY_STATUS or attempt == attempts - 1:
+                return r
+            try:
+                wait = float(r.headers.get("Retry-After", "0"))
+            except ValueError:
+                wait = 0.0
+            wait = max(wait, delay)
+            if r.status_code == 429:
+                # Slow down for the rest of the run, not just this request.
+                self.min_interval = min(self.min_interval * 1.5, 5.0)
+            log.info("%s on %s; retrying in %.1fs", r.status_code, url, wait)
+            time.sleep(wait)
+            delay *= 2
         return r
 
+    def get(self, url: str, **kw) -> requests.Response:
+        return self._request("GET", url, **kw)
+
     def post(self, url: str, **kw) -> requests.Response:
-        self._throttle(url)
-        kw.setdefault("timeout", self.timeout)
-        return self.session.post(url, **kw)
+        return self._request("POST", url, **kw)
 
     def get_json(self, url: str, **kw):
         r = self.get(url, **kw)

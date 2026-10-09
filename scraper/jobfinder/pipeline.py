@@ -99,7 +99,9 @@ def run(only: list[str] | None = None, limit: int | None = None, workers: int = 
             sid = futs[fut]
             items, status = fut.result()
             public = [o.to_public() for o in items]
-            if status["ok"] and (public or not _load_snapshot(sid)):
+            # An empty result almost always means the site changed or blocked us, not that every
+            # posting vanished overnight, so it never overwrites the previous snapshot.
+            if status["ok"] and public:
                 if limit is None:
                     _save_snapshot(sid, public)
                 per_source[sid] = public
@@ -108,7 +110,10 @@ def run(only: list[str] | None = None, limit: int | None = None, workers: int = 
                 stale = _load_snapshot(sid)
                 today = date.today().isoformat()
                 per_source[sid] = [x for x in stale if not x.get("deadline") or x["deadline"] >= today]
-                status["stale"] = True
+                status["stale"] = bool(stale)
+                if status["ok"] and not public:
+                    status["ok"] = False
+                    status.setdefault("error", "no items returned")
             statuses[sid] = status
 
     # Sources not run this time (``--only``) keep their previous snapshot.

@@ -40,34 +40,80 @@ class Euraxess(Source):
     id = "euraxess"
     name = "EURAXESS"
     homepage = BASE + "/jobs/search"
-    min_interval = 0.4
-    max_pages = 800
-    workers = 4
+    # EURAXESS rate-limits bursts (HTTP 429); one request every ~1.5 s stays well under it.
+    min_interval = 1.5
+    workers = 1
 
-    def listing_url(self, page: int) -> str:
-        params = [(f"f[{i}]", f"job_research_field:{fid}") for i, fid in enumerate(EURAXESS_STEM_FIELD_IDS)]
-        params.append(("page", str(page)))
+    PAGE_CAP = 40  # the search UI never pages past 40 x 10 results; deeper pages wrap to page 0
+
+    @staticmethod
+    def search_url(facets: list[tuple[str, int]], page: int = 0) -> str:
+        params = [(f"f[{i}]", f"{name}:{val}") for i, (name, val) in enumerate(facets)]
+        if page:
+            params.append(("page", str(page)))
         return f"{BASE}/jobs/search?{urlencode(params)}"
+
+    @staticmethod
+    def result_count(html: str) -> int:
+        text = soup(html).get_text(" ", strip=True)
+        m = re.search(r"Search results\s*\((\d[\d,]*)\)", text)
+        return int(m.group(1).replace(",", "")) if m else 0
+
+    @staticmethod
+    def country_ids(html: str) -> list[int]:
+        sel = soup(html).find("select", attrs={"name": "job_country[]"})
+        return [int(o["value"]) for o in sel.select("option")] if sel else []
 
     # ------------------------------------------------------------ listing
 
     def crawl_listing(self) -> list[dict]:
-        rows: list[dict] = []
-        seen: set[str] = set()
-        for page in range(self.max_pages):
-            r = self.http.get(self.listing_url(page))
-            r.raise_for_status()
-            cards = self.parse_listing(r.text)
-            new = [c for c in cards if c["id"] not in seen]
-            if not new:
-                break
-            for c in new:
-                seen.add(c["id"])
-            rows.extend(new)
-            self.log.info("listing page %d: %d cards (total %d)", page, len(new), len(rows))
-            if self.limit and len(rows) >= self.limit:
-                return rows[: self.limit]
-        return rows
+        """Crawl every STEM posting, partitioning queries so none exceeds the page cap."""
+        fields = [("job_research_field", f) for f in EURAXESS_STEM_FIELD_IDS]
+        first = self.http.get(self.search_url(fields))
+        first.raise_for_status()
+        total = self.result_count(first.text)
+        self.log.info("%d STEM postings advertised", total)
+
+        rows: dict[str, dict] = {}
+        partitions: list[list[tuple[str, int]]] = []
+        if total <= self.PAGE_CAP * 10:
+            partitions.append(fields)
+        else:
+            for cid in self.country_ids(first.text):
+                partitions.append(fields + [("job_country", cid)])
+
+        while partitions:
+            facets = partitions.pop(0)
+            r = self.http.get(self.search_url(facets))
+            if r.status_code != 200:
+                self.log.warning("partition %s -> HTTP %s", facets[-1], r.status_code)
+                continue
+            n = self.result_count(r.text)
+            if n == 0:
+                continue
+            field_facets = [f for f in facets if f[0] == "job_research_field"]
+            if n > self.PAGE_CAP * 10 and len(field_facets) > 1:
+                # Too big: split this country by research field (overlaps are de-duplicated).
+                rest = [f for f in facets if f[0] != "job_research_field"]
+                partitions[:0] = [rest + [f] for f in field_facets]
+                continue
+            pages = min(self.PAGE_CAP, (n + 9) // 10)
+            for page in range(pages):
+                if page == 0:
+                    html = r.text
+                else:
+                    rp = self.http.get(self.search_url(facets, page))
+                    if rp.status_code != 200:
+                        self.log.warning("page %d of %s -> HTTP %s", page, facets[-1], rp.status_code)
+                        continue
+                    html = rp.text
+                for c in self.parse_listing(html):
+                    rows.setdefault(c["id"], c)
+                if self.limit and len(rows) >= self.limit:
+                    return list(rows.values())[: self.limit]
+            self.log.info("partition %s: %d results, %d unique so far", facets[len(field_facets):] or "all",
+                          n, len(rows))
+        return list(rows.values())
 
     @staticmethod
     def parse_listing(html: str) -> list[dict]:
