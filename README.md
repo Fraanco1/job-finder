@@ -38,11 +38,39 @@ Given the date you are available from (`D`, never earlier than today):
 
 ## Data sources
 
-| Source | Covers | Method |
-| --- | --- | --- |
-| [EURAXESS](https://euraxess.ec.europa.eu/jobs/search) | PhD, postdoc, master's and research positions, mostly in Europe | Listing crawl + detail page per posting (cached), polite rate limit |
+26 sources, grouped by what they mostly contribute:
 
-*More sources are being added. The table is updated as they land.*
+**Research positions (PhD, postdoc, research staff)**
+
+| Source | Covers |
+| --- | --- |
+| [EURAXESS](https://euraxess.ec.europa.eu/jobs/search) | European Commission research portal: PhD, postdoc, master's and research jobs, mostly Europe |
+| [INSPIRE-HEP Jobs](https://inspirehep.net/jobs) | High-energy, nuclear, astro and theoretical physics postdocs, PhDs and faculty, worldwide |
+| [AcademicJobsOnline](https://academicjobsonline.org/ajo/jobs) | Maths, physics and CS postdocs, faculty and PhD positions, worldwide |
+| [MathJobs.org (AMS)](https://www.mathjobs.org/jobs) | Mathematics and statistics positions |
+| [European Mathematical Society](https://euromathsoc.org/jobs) | Mathematics positions in Europe |
+| [CERN](https://careers.cern/) · [ESO](https://recruitment.eso.org/) · [ESA](https://jobs.esa.int/) · [Max Planck Society](https://www.mpg.de/jobboard) | Staff, fellowships, studentships and student programmes at the big labs |
+| [FAPESP](https://fapesp.br/oportunidades/) | Funded fellowships in São Paulo, Brazil |
+| [AcademicTransfer](https://www.academictransfer.com/en/jobs/) | Netherlands: PhD, postdoc, thesis projects |
+| [ETH Zurich](https://jobs.ethz.ch/) | Doctoral, postdoc, student-assistant and internship positions |
+| [Varbi boards](https://kth.varbi.com/en/) | Swedish and Danish universities (KTH, Chalmers, Lund, DTU, …) |
+| [Jobbnorge](https://www.jobbnorge.no/search/en) | Norwegian PhD fellowships and postdocs |
+| [Nature Careers](https://www.nature.com/naturecareers/jobs/phd-position/) | PhD positions worldwide |
+
+**Master's programmes, studentships and internships**
+
+| Source | Covers |
+| --- | --- |
+| [DAAD International Programmes](https://www2.daad.de/deutschland/studienangebote/international-programmes/en/) | English-taught master's and PhD programmes in Germany, with deadlines and intake dates |
+| [jobs.ac.uk](https://www.jobs.ac.uk/phd) | UK PhD studentships and funded master's |
+| [Fraunhofer](https://jobs.fraunhofer.de/) | Theses, internships, student jobs and PhDs in Germany |
+| [Arbeitnow](https://www.arbeitnow.com/) | STEM internships and working-student jobs, mostly Germany |
+
+**Industry jobs and internships** from the public job-board APIs of 267 STEM employers
+(quantum, photonics, semiconductors, space, fusion, energy, robotics, biotech, scientific
+computing, quant finance…), listed in `scraper/jobfinder/sources/companies.json`:
+Greenhouse, Lever, Ashby, Workable, Personio, Teamtailor and SmartRecruiters. Non-technical
+roles (sales, recruiting, legal, finance, marketing…) are filtered out by title.
 
 Every source returns the same normalized record. Classification is rule-based (keywords
 plus each source's own field labels; see `scraper/jobfinder/taxonomy.py`), and locations are
